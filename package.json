@@ -2,18 +2,21 @@
   "name": "trip-planner",
   "private": true,
   "version": "0.1.0",
-  "packageManager": "pnpm@9.12.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck",
-    "db:generate": "pnpm --filter @trip-planner/api run db:generate",
-    "db:migrate": "pnpm --filter @trip-planner/api run db:migrate",
-    "db:seed": "pnpm --filter @trip-planner/api run db:seed",
-    "api:dev": "pnpm --filter @trip-planner/api run dev",
-    "web:dev": "pnpm --filter @trip-planner/web run dev"
+    "db:generate": "npm run db:generate -w @trip-planner/api",
+    "db:migrate": "npm run db:migrate -w @trip-planner/api",
+    "db:seed": "npm run db:seed -w @trip-planner/api",
+    "api:dev": "npm run dev -w @trip-planner/api",
+    "web:dev": "npm run dev -w @trip-planner/web"
   },
   "devDependencies": {
     "turbo": "^2.3.3",

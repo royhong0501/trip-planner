@@ -1,0 +1,151 @@
+// Prisma schema for @trip-planner/api.
+//
+// Conventions:
+// - `@map(...)` keeps Postgres columns snake_case while the generated client
+//   exposes camelCase fields — matches the Drizzle layout we migrated from.
+// - JSONB columns use `Json` with a `@db.JsonB`. Generic arrays/objects are
+//   typed at the service layer via TypeScript cast / shared-types interfaces.
+// - Foreign keys use the same ON DELETE semantics as before (CASCADE for
+//   tree rows, RESTRICT for payer, SET NULL for reminder.assignedParticipant).
+// - Check constraints (category/status enums, non-empty strings, non-negative
+//   amounts) are applied in a raw-SQL migration that runs alongside the
+//   generated CREATE TABLE — see prisma/migrations/*_checks.sql.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Trip {
+  id               String   @id @default(uuid()) @db.Uuid
+  title            String   @default("")
+  coverImage       String   @default("") @map("cover_image")
+  startDate        String   @default("") @map("start_date")
+  endDate          String   @default("") @map("end_date")
+  category         String   @default("domestic")
+  status           String   @default("planning")
+  todos            Json     @default("[]") @db.JsonB
+  flights          Json     @default("{\"departure\":{},\"return\":{}}") @db.JsonB
+  hotels           Json     @default("[]") @db.JsonB
+  dailyItineraries Json     @default("[]") @map("daily_itineraries") @db.JsonB
+  luggageList      Json     @default("[]") @map("luggage_list") @db.JsonB
+  shoppingList     Json     @default("[]") @map("shopping_list") @db.JsonB
+  otherNotes       String   @default("") @map("other_notes")
+  weatherCities    Json     @default("[]") @map("weather_cities") @db.JsonB
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  participants TripParticipant[]
+  expenses     Expense[]
+  todoRows     Todo[]
+
+  @@map("trips")
+}
+
+model TripParticipant {
+  id          String   @id @default(uuid()) @db.Uuid
+  tripId      String   @map("trip_id") @db.Uuid
+  displayName String   @map("display_name")
+  email       String?
+  userId      String?  @map("user_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  trip         Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  expensesPaid Expense[]      @relation("expense_payer")
+  splits       ExpenseSplit[]
+  todos        Todo[]         @relation("todo_assigned_participant")
+
+  @@index([tripId], map: "trip_participants_trip_id_idx")
+  @@map("trip_participants")
+}
+
+model Expense {
+  id           String   @id @default(uuid()) @db.Uuid
+  tripId       String   @map("trip_id") @db.Uuid
+  title        String
+  amountTotal  Decimal  @map("amount_total") @db.Decimal(14, 2)
+  currency     String   @default("TWD")
+  exchangeRate Decimal  @default(1) @map("exchange_rate") @db.Decimal(18, 8)
+  payerId      String   @map("payer_id") @db.Uuid
+  expenseDate  DateTime @map("expense_date") @db.Date
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  trip   Trip            @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  payer  TripParticipant @relation("expense_payer", fields: [payerId], references: [id], onDelete: Restrict)
+  splits ExpenseSplit[]
+
+  @@index([tripId], map: "expenses_trip_id_idx")
+  @@index([tripId, expenseDate(sort: Desc)], map: "expenses_trip_id_expense_date_desc_idx")
+  @@map("expenses")
+}
+
+model ExpenseSplit {
+  id            String  @id @default(uuid()) @db.Uuid
+  expenseId     String  @map("expense_id") @db.Uuid
+  participantId String  @map("participant_id") @db.Uuid
+  owedAmount    Decimal @map("owed_amount") @db.Decimal(14, 2)
+
+  expense     Expense         @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  participant TripParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@unique([expenseId, participantId], map: "expense_splits_expense_participant_unique")
+  @@index([expenseId], map: "expense_splits_expense_id_idx")
+  @@index([participantId], map: "expense_splits_participant_id_idx")
+  @@map("expense_splits")
+}
+
+/// Reminder-email backing rows. One row per todo that has a remind time.
+/// BullMQ is the primary scheduler; this table exists for audit + cancellation.
+model Todo {
+  id                      String   @id @db.Uuid
+  tripId                  String   @map("trip_id") @db.Uuid
+  taskName                String   @map("task_name")
+  reminderTime            DateTime @map("reminder_time") @db.Timestamptz(6)
+  assignedParticipantId   String?  @map("assigned_participant_id") @db.Uuid
+  isNotified              Boolean  @default(false) @map("is_notified")
+  retryCount              Int      @default(0) @map("retry_count")
+  /// BullMQ job id, so we can cancel when the todo is removed / remindTime changes.
+  jobId                   String?  @map("job_id")
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  trip                Trip             @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  assignedParticipant TripParticipant? @relation("todo_assigned_participant", fields: [assignedParticipantId], references: [id], onDelete: SetNull)
+
+  @@map("todos")
+}
+
+model HomepageSetting {
+  key       String   @id
+  value     Json     @default("null") @db.JsonB
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("homepage_settings")
+}
+
+/// Audit trail for the reminder-email worker — one row per worker invocation.
+/// `details` is EmailJobDetail[] at the TS layer (see src/queue/reminderQueue.ts).
+model EmailJobLog {
+  id           String   @id @default(uuid()) @db.Uuid
+  triggeredAt  DateTime @map("triggered_at") @db.Timestamptz(6)
+  totalFound   Int      @map("total_found")
+  sentCount    Int      @map("sent_count")
+  details      Json     @db.JsonB
+  source       String   @default("bullmq")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("email_job_logs")
+}
+
+model AdminUser {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("admin_users")
+}

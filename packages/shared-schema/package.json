@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "zod": "^3.25.76",
-    "@trip-planner/shared-types": "workspace:*"
+    "@trip-planner/shared-types": "*"
   },
   "devDependencies": {
     "typescript": "^5.8.3"

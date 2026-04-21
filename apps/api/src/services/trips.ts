@@ -1,4 +1,3 @@
-import { asc, desc, eq, sql } from 'drizzle-orm';
 import { rowToTrip, rowToTripSummary } from '@trip-planner/shared-types';
 import type {
   LuggageCategory,
@@ -9,11 +8,43 @@ import type {
   TripSummary,
   TripSummaryRow,
 } from '@trip-planner/shared-types';
-import { db } from '../db/client.js';
-import { todos as todoRemindersTable, trips } from '../db/schema/index.js';
+import { prisma } from '../db/client.js';
 import { HttpError } from '../utils/httpError.js';
 
-function recordToRow(r: typeof trips.$inferSelect): TripRow {
+type PrismaTripRecord = {
+  id: string;
+  title: string;
+  coverImage: string;
+  startDate: string;
+  endDate: string;
+  category: string;
+  status: string;
+  todos: unknown;
+  flights: unknown;
+  hotels: unknown;
+  dailyItineraries: unknown;
+  luggageList: unknown;
+  shoppingList: unknown;
+  otherNotes: string;
+  weatherCities: unknown;
+  createdAt: Date;
+};
+
+type PrismaTripSummary = Pick<
+  PrismaTripRecord,
+  | 'id'
+  | 'title'
+  | 'coverImage'
+  | 'startDate'
+  | 'endDate'
+  | 'category'
+  | 'status'
+  | 'luggageList'
+  | 'shoppingList'
+  | 'createdAt'
+>;
+
+function recordToRow(r: PrismaTripRecord): TripRow {
   return {
     id: r.id,
     title: r.title,
@@ -22,30 +53,19 @@ function recordToRow(r: typeof trips.$inferSelect): TripRow {
     end_date: r.endDate,
     category: r.category as TripRow['category'],
     status: r.status as TripRow['status'],
-    todos: r.todos,
-    flights: r.flights,
-    hotels: r.hotels,
-    daily_itineraries: r.dailyItineraries,
-    luggage_list: r.luggageList,
-    shopping_list: r.shoppingList,
+    todos: r.todos as TripRow['todos'],
+    flights: r.flights as TripRow['flights'],
+    hotels: r.hotels as TripRow['hotels'],
+    daily_itineraries: r.dailyItineraries as TripRow['daily_itineraries'],
+    luggage_list: r.luggageList as TripRow['luggage_list'],
+    shopping_list: r.shoppingList as TripRow['shopping_list'],
     other_notes: r.otherNotes,
-    weather_cities: r.weatherCities,
+    weather_cities: r.weatherCities as TripRow['weather_cities'],
     created_at: r.createdAt.toISOString(),
   };
 }
 
-function summaryRecordToRow(r: {
-  id: string;
-  title: string;
-  coverImage: string;
-  startDate: string;
-  endDate: string;
-  category: string;
-  status: string;
-  luggageList: LuggageCategory[];
-  shoppingList: ShoppingItem[];
-  createdAt: Date;
-}): TripSummaryRow {
+function summaryRecordToRow(r: PrismaTripSummary): TripSummaryRow {
   return {
     id: r.id,
     title: r.title,
@@ -54,8 +74,8 @@ function summaryRecordToRow(r: {
     end_date: r.endDate,
     category: r.category as TripSummaryRow['category'],
     status: r.status as TripSummaryRow['status'],
-    luggage_list: r.luggageList,
-    shopping_list: r.shoppingList,
+    luggage_list: r.luggageList as TripSummaryRow['luggage_list'],
+    shopping_list: r.shoppingList as TripSummaryRow['shopping_list'],
     created_at: r.createdAt.toISOString(),
   };
 }
@@ -65,52 +85,50 @@ function summaryRecordToRow(r: {
  * so the list view doesn't drag in daily_itineraries (base64 images) per trip.
  */
 export async function listTrips(): Promise<TripSummary[]> {
-  const rows = await db
-    .select({
-      id: trips.id,
-      title: trips.title,
-      coverImage: trips.coverImage,
-      startDate: trips.startDate,
-      endDate: trips.endDate,
-      category: trips.category,
-      status: trips.status,
-      luggageList: trips.luggageList,
-      shoppingList: trips.shoppingList,
-      createdAt: trips.createdAt,
-    })
-    .from(trips)
-    .orderBy(desc(trips.startDate));
+  const rows = await prisma.trip.findMany({
+    select: {
+      id: true,
+      title: true,
+      coverImage: true,
+      startDate: true,
+      endDate: true,
+      category: true,
+      status: true,
+      luggageList: true,
+      shoppingList: true,
+      createdAt: true,
+    },
+    orderBy: { startDate: 'desc' },
+  });
 
   return rows.map((r) => rowToTripSummary(summaryRecordToRow(r)));
 }
 
 export async function getTripById(id: string): Promise<Trip | null> {
-  const [row] = await db.select().from(trips).where(eq(trips.id, id)).limit(1);
+  const row = await prisma.trip.findUnique({ where: { id } });
   if (!row) return null;
   return rowToTrip(recordToRow(row));
 }
 
 export async function createTripRecord(trip: Trip): Promise<Trip> {
-  const [inserted] = await db
-    .insert(trips)
-    .values({
+  const inserted = await prisma.trip.create({
+    data: {
       title: trip.title,
       coverImage: trip.coverImage,
       startDate: trip.startDate,
       endDate: trip.endDate,
       category: trip.category,
       status: trip.status,
-      todos: trip.todos,
-      flights: trip.flights,
-      hotels: trip.hotels,
-      dailyItineraries: trip.dailyItineraries,
-      luggageList: trip.luggageList,
-      shoppingList: trip.shoppingList,
+      todos: trip.todos as object,
+      flights: trip.flights as object,
+      hotels: trip.hotels as object,
+      dailyItineraries: trip.dailyItineraries as object,
+      luggageList: trip.luggageList as object,
+      shoppingList: trip.shoppingList as object,
       otherNotes: trip.otherNotes,
-      weatherCities: trip.weatherCities,
-    })
-    .returning();
-  if (!inserted) throw new Error('Failed to insert trip');
+      weatherCities: trip.weatherCities as object,
+    },
+  });
   return rowToTrip(recordToRow(inserted));
 }
 
@@ -124,24 +142,28 @@ export async function createTripRecord(trip: Trip): Promise<Trip> {
 export async function updateTripRecord(id: string, partial: Partial<Trip>): Promise<Trip> {
   const { todos: _ignored, id: _ignoredId, createdAt: _ignoredCreated, ...rest } = partial;
 
-  const update: Partial<typeof trips.$inferInsert> = {};
+  const update: Record<string, unknown> = {};
   if (rest.title !== undefined) update.title = rest.title;
   if (rest.coverImage !== undefined) update.coverImage = rest.coverImage;
   if (rest.startDate !== undefined) update.startDate = rest.startDate;
   if (rest.endDate !== undefined) update.endDate = rest.endDate;
   if (rest.category !== undefined) update.category = rest.category;
   if (rest.status !== undefined) update.status = rest.status;
-  if (rest.flights !== undefined) update.flights = rest.flights;
-  if (rest.hotels !== undefined) update.hotels = rest.hotels;
-  if (rest.dailyItineraries !== undefined) update.dailyItineraries = rest.dailyItineraries;
-  if (rest.luggageList !== undefined) update.luggageList = rest.luggageList;
-  if (rest.shoppingList !== undefined) update.shoppingList = rest.shoppingList;
+  if (rest.flights !== undefined) update.flights = rest.flights as object;
+  if (rest.hotels !== undefined) update.hotels = rest.hotels as object;
+  if (rest.dailyItineraries !== undefined) update.dailyItineraries = rest.dailyItineraries as object;
+  if (rest.luggageList !== undefined) update.luggageList = rest.luggageList as object;
+  if (rest.shoppingList !== undefined) update.shoppingList = rest.shoppingList as object;
   if (rest.otherNotes !== undefined) update.otherNotes = rest.otherNotes;
-  if (rest.weatherCities !== undefined) update.weatherCities = rest.weatherCities;
+  if (rest.weatherCities !== undefined) update.weatherCities = rest.weatherCities as object;
 
-  const [row] = await db.update(trips).set(update).where(eq(trips.id, id)).returning();
-  if (!row) throw HttpError.notFound(`Trip ${id} not found`);
-  return rowToTrip(recordToRow(row));
+  try {
+    const row = await prisma.trip.update({ where: { id }, data: update });
+    return rowToTrip(recordToRow(row));
+  } catch (err) {
+    if (isNotFoundError(err)) throw HttpError.notFound(`Trip ${id} not found`);
+    throw err;
+  }
 }
 
 export async function updateTripLists(
@@ -149,23 +171,31 @@ export async function updateTripLists(
   luggageList: LuggageCategory[],
   shoppingList: ShoppingItem[],
 ): Promise<void> {
-  const result = await db
-    .update(trips)
-    .set({ luggageList, shoppingList })
-    .where(eq(trips.id, id))
-    .returning({ id: trips.id });
-  if (result.length === 0) throw HttpError.notFound(`Trip ${id} not found`);
+  try {
+    await prisma.trip.update({
+      where: { id },
+      data: {
+        luggageList: luggageList as object,
+        shoppingList: shoppingList as object,
+      },
+      select: { id: true },
+    });
+  } catch (err) {
+    if (isNotFoundError(err)) throw HttpError.notFound(`Trip ${id} not found`);
+    throw err;
+  }
 }
 
 export async function deleteTripRecord(id: string): Promise<void> {
-  // Cascade via FK will remove participants + expenses + splits. todos reminder rows
-  // cascade too (FK on trip_id). We wrap both in a transaction so cancel-queue can
-  // happen alongside (done in the route layer after the tx commits).
-  await db.transaction(async (tx) => {
-    await tx.delete(todoRemindersTable).where(eq(todoRemindersTable.tripId, id));
-    const deleted = await tx.delete(trips).where(eq(trips.id, id)).returning({ id: trips.id });
-    if (deleted.length === 0) {
-      throw HttpError.notFound(`Trip ${id} not found`);
+  // Reminder rows cascade via FK, but we clear them first inside the same tx so
+  // the route layer's post-commit queue cancellation sees a consistent set.
+  await prisma.$transaction(async (tx) => {
+    await tx.todo.deleteMany({ where: { tripId: id } });
+    try {
+      await tx.trip.delete({ where: { id } });
+    } catch (err) {
+      if (isNotFoundError(err)) throw HttpError.notFound(`Trip ${id} not found`);
+      throw err;
     }
   });
 }
@@ -181,11 +211,11 @@ export async function patchTripTodos(
   tripId: string,
   mutator: (todos: TodoItem[]) => TodoItem[],
 ): Promise<TodoItem[]> {
-  return db.transaction(async (tx) => {
-    const rows = await tx.execute(
-      sql`select todos from trips where id = ${tripId} for update`,
-    );
-    const firstRow = rows.rows[0] as { todos: TodoItem[] } | undefined;
+  return prisma.$transaction(async (tx) => {
+    const rows = await tx.$queryRaw<Array<{ todos: TodoItem[] }>>`
+      select todos from trips where id = ${tripId}::uuid for update
+    `;
+    const firstRow = rows[0];
     if (!firstRow) {
       throw HttpError.notFound(`Trip ${tripId} not found`);
     }
@@ -193,7 +223,11 @@ export async function patchTripTodos(
     const fresh = (firstRow.todos ?? []) as TodoItem[];
     const next = mutator(fresh);
 
-    await tx.update(trips).set({ todos: next }).where(eq(trips.id, tripId));
+    await tx.trip.update({
+      where: { id: tripId },
+      data: { todos: next as object },
+      select: { id: true },
+    });
     return next;
   });
 }
@@ -226,9 +260,18 @@ export function applyTodoOp(
 
 /** Used by admin ad-hoc debugging + tests. Ordered chronologically. */
 export async function listTodoReminders(tripId: string) {
-  return db
-    .select()
-    .from(todoRemindersTable)
-    .where(eq(todoRemindersTable.tripId, tripId))
-    .orderBy(asc(todoRemindersTable.reminderTime));
+  return prisma.todo.findMany({
+    where: { tripId },
+    orderBy: { reminderTime: 'asc' },
+  });
+}
+
+/** Prisma throws P2025 when update/delete targets a missing row. */
+function isNotFoundError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: string }).code === 'P2025'
+  );
 }

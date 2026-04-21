@@ -2,7 +2,7 @@
  * Standalone entry for running the reminder worker in its own process.
  * Useful for production where the API and the worker are scaled independently.
  *
- *   pnpm --filter @trip-planner/api run worker:reminder
+ *   npm run worker:reminder -w @trip-planner/api
  */
 import { closeReminderQueue, ensureReminderWorker } from './reminderQueue.js';
 

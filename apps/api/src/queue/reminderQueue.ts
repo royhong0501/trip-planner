@@ -1,12 +1,22 @@
 import { Queue, QueueEvents, Worker, type Job } from 'bullmq';
-import { eq } from 'drizzle-orm';
-import { db } from '../db/client.js';
-import { todos as todoRemindersTable, trips, tripParticipants } from '../db/schema/index.js';
-import { emailJobLogs, type EmailJobDetail } from '../db/schema/emailJobLogs.js';
+import { prisma } from '../db/client.js';
 import { env } from '../config/env.js';
 import { bullConnection } from './connection.js';
 
 export const REMINDER_QUEUE_NAME = 'trip-reminders';
+
+/**
+ * Shape of each item in `email_job_logs.details`. Kept stable for admins who
+ * pivot this JSON in ad-hoc queries (see docs/VERIFICATION.md).
+ */
+export interface EmailJobDetail {
+  todo_id: string;
+  task_name: string;
+  trip_title: string;
+  status: 'sent' | 'failed' | 'abandoned';
+  retry_count: number;
+  error?: string;
+}
 
 export interface ReminderJobData {
   todoId: string;
@@ -53,10 +63,10 @@ export async function cancelReminder(jobId: string): Promise<void> {
 }
 
 export async function cancelRemindersForTrip(tripId: string): Promise<void> {
-  const rows = await db
-    .select({ id: todoRemindersTable.id, jobId: todoRemindersTable.jobId })
-    .from(todoRemindersTable)
-    .where(eq(todoRemindersTable.tripId, tripId));
+  const rows = await prisma.todo.findMany({
+    where: { tripId },
+    select: { id: true, jobId: true },
+  });
   await Promise.all(
     rows.map((r) => {
       const jobId = r.jobId ?? `reminder:${r.id}`;
@@ -94,22 +104,15 @@ export async function closeReminderQueue(): Promise<void> {
 async function processReminderJob(job: Job<ReminderJobData>): Promise<EmailJobDetail> {
   const triggeredAt = new Date();
 
-  const [row] = await db
-    .select({
-      todo: todoRemindersTable,
-      trip: trips,
-      participant: tripParticipants,
-    })
-    .from(todoRemindersTable)
-    .leftJoin(trips, eq(trips.id, todoRemindersTable.tripId))
-    .leftJoin(
-      tripParticipants,
-      eq(tripParticipants.id, todoRemindersTable.assignedParticipantId),
-    )
-    .where(eq(todoRemindersTable.id, job.data.todoId))
-    .limit(1);
+  const todoRow = await prisma.todo.findUnique({
+    where: { id: job.data.todoId },
+    include: {
+      trip: { select: { title: true } },
+      assignedParticipant: { select: { email: true } },
+    },
+  });
 
-  if (!row || !row.todo) {
+  if (!todoRow) {
     const detail: EmailJobDetail = {
       todo_id: job.data.todoId,
       task_name: '',
@@ -121,25 +124,25 @@ async function processReminderJob(job: Job<ReminderJobData>): Promise<EmailJobDe
     await writeJobLog(triggeredAt, 0, 0, [detail]);
     return detail;
   }
-  if (row.todo.isNotified) {
+  if (todoRow.isNotified) {
     const detail: EmailJobDetail = {
-      todo_id: row.todo.id,
-      task_name: row.todo.taskName,
-      trip_title: row.trip?.title ?? '',
+      todo_id: todoRow.id,
+      task_name: todoRow.taskName,
+      trip_title: todoRow.trip?.title ?? '',
       status: 'sent',
-      retry_count: row.todo.retryCount,
+      retry_count: todoRow.retryCount,
       error: 'already notified — no-op',
     };
     return detail;
   }
 
   const fallback = env.REMINDER_FALLBACK_EMAIL ?? '';
-  const recipient = row.participant?.email?.trim() || fallback;
+  const recipient = todoRow.assignedParticipant?.email?.trim() || fallback;
   if (!recipient) {
     const detail: EmailJobDetail = {
-      todo_id: row.todo.id,
-      task_name: row.todo.taskName,
-      trip_title: row.trip?.title ?? '',
+      todo_id: todoRow.id,
+      task_name: todoRow.taskName,
+      trip_title: todoRow.trip?.title ?? '',
       status: 'failed',
       retry_count: job.attemptsMade,
       error: 'no recipient email available (participant + REMINDER_FALLBACK_EMAIL both empty)',
@@ -148,22 +151,23 @@ async function processReminderJob(job: Job<ReminderJobData>): Promise<EmailJobDe
     throw new Error(detail.error);
   }
 
-  const tripTitle = row.trip?.title ?? '未命名行程';
-  const subject = `【提醒】${tripTitle} 的待辦：${row.todo.taskName}`;
-  const htmlContent = `<strong>時間到囉！</strong><br>您在行程「<strong>${escapeHtml(tripTitle)}</strong>」中設定的待辦事項「<strong>${escapeHtml(row.todo.taskName)}</strong>」已經到期了，請趕快去處理吧！`;
+  const tripTitle = todoRow.trip?.title ?? '未命名行程';
+  const subject = `【提醒】${tripTitle} 的待辦：${todoRow.taskName}`;
+  const htmlContent = `<strong>時間到囉！</strong><br>您在行程「<strong>${escapeHtml(tripTitle)}</strong>」中設定的待辦事項「<strong>${escapeHtml(todoRow.taskName)}</strong>」已經到期了，請趕快去處理吧！`;
 
   try {
     await sendBrevoEmail({ to: recipient, subject, htmlContent });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    const newCount = row.todo.retryCount + 1;
-    await db
-      .update(todoRemindersTable)
-      .set({ retryCount: newCount })
-      .where(eq(todoRemindersTable.id, row.todo.id));
+    const newCount = todoRow.retryCount + 1;
+    await prisma.todo.update({
+      where: { id: todoRow.id },
+      data: { retryCount: newCount },
+      select: { id: true },
+    });
     const detail: EmailJobDetail = {
-      todo_id: row.todo.id,
-      task_name: row.todo.taskName,
+      todo_id: todoRow.id,
+      task_name: todoRow.taskName,
       trip_title: tripTitle,
       status: 'failed',
       retry_count: newCount,
@@ -173,16 +177,17 @@ async function processReminderJob(job: Job<ReminderJobData>): Promise<EmailJobDe
     throw err;
   }
 
-  await db
-    .update(todoRemindersTable)
-    .set({ isNotified: true })
-    .where(eq(todoRemindersTable.id, row.todo.id));
+  await prisma.todo.update({
+    where: { id: todoRow.id },
+    data: { isNotified: true },
+    select: { id: true },
+  });
   const detail: EmailJobDetail = {
-    todo_id: row.todo.id,
-    task_name: row.todo.taskName,
+    todo_id: todoRow.id,
+    task_name: todoRow.taskName,
     trip_title: tripTitle,
     status: 'sent',
-    retry_count: row.todo.retryCount,
+    retry_count: todoRow.retryCount,
   };
   await writeJobLog(triggeredAt, 1, 1, [detail]);
   return detail;
@@ -220,12 +225,14 @@ async function writeJobLog(
   details: EmailJobDetail[],
 ): Promise<void> {
   try {
-    await db.insert(emailJobLogs).values({
-      triggeredAt,
-      totalFound,
-      sentCount,
-      details,
-      source: 'bullmq',
+    await prisma.emailJobLog.create({
+      data: {
+        triggeredAt,
+        totalFound,
+        sentCount,
+        details: details as object,
+        source: 'bullmq',
+      },
     });
   } catch (err) {
     console.error('[reminderQueue] failed to write email_job_logs', err);

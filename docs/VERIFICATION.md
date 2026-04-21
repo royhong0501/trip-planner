@@ -1,6 +1,6 @@
 # 新 monorepo 上線前驗證
 
-分三層：**docker compose** 服務活著、**pnpm dev** build 通、**使用者流程**端到端可用。每層的下一層失敗都可能是上一層沒跑起來，所以請依序往下。
+分三層：**docker compose** 服務活著、**npm run dev** build 通、**使用者流程**端到端可用。每層的下一層失敗都可能是上一層沒跑起來，所以請依序往下。
 
 ## 1. Docker compose 服務
 
@@ -26,9 +26,15 @@ docker compose ps
 ## 2. 初始化資料庫
 
 ```bash
-pnpm install
-pnpm db:migrate        # apps/api: drizzle-kit push to DATABASE_URL
-pnpm db:seed           # 建立第一個 admin（讀 ADMIN_SEED_EMAIL / ADMIN_SEED_PASSWORD）
+npm install
+# 本機第一次（會跑 prisma migrate dev，互動建立 baseline migration）
+npm run db:generate -w @trip-planner/api
+
+# 或者以部署腳本套既有 migration + CHECK constraints
+npm run db:migrate -w @trip-planner/api
+
+# 建立第一個 admin（讀 ADMIN_SEED_EMAIL / ADMIN_SEED_PASSWORD）
+npm run db:seed -w @trip-planner/api
 ```
 
 驗證：
@@ -41,23 +47,28 @@ psql "$DATABASE_URL" -c "SELECT id, email FROM admin_users;"
 ## 3. Build / lint / test
 
 ```bash
-pnpm -r typecheck
-pnpm -r lint
-pnpm -r test
-pnpm -r build
+npm run typecheck --workspaces --if-present
+npm run lint --workspaces --if-present
+npm run test --workspaces --if-present
+npm run build --workspaces --if-present
 ```
+
+> 或使用 Turborepo：`npx turbo run typecheck lint test build`。
 
 全通過再繼續。local 開發時期若某些整合測試需要連 DB/Redis，務必確認 §1 已起。
 
 ## 4. 開發伺服器
 
 ```bash
-pnpm dev
+npx turbo run dev
+# 或分別：
+#   npm run dev -w @trip-planner/api
+#   npm run dev -w @trip-planner/web
 ```
 
 - API: `http://localhost:3000`
 - Web: `http://localhost:5173`（vite dev server 把 `/api/*` proxy 到 3000）
-- BullMQ worker: 與 API 同進程（`ensureReminderWorker()` 於 API 啟動時註冊），寄信前看 api server stdout。若你分開用 `pnpm --filter @trip-planner/api worker:reminder` 跑 stand-alone worker，請確認 API 那邊關閉對應的 worker，避免重複處理。
+- BullMQ worker: 與 API 同進程（`ensureReminderWorker()` 於 API 啟動時註冊），寄信前看 api server stdout。若你分開用 `npm run worker:reminder -w @trip-planner/api` 跑 stand-alone worker，請確認 API 那邊關閉對應的 worker，避免重複處理。
 
 ## 5. 端到端流程
 
@@ -87,10 +98,11 @@ pnpm dev
 3. 在同一頁用兩個分頁同時 toggle 不同 todo 的 checked：兩次請求都要成功，且最終狀態兩個 toggle 都生效（後端對 `trips.todos` 用 `SELECT ... FOR UPDATE`）。
 4. 等 2 分鐘，提醒信寄到信箱。同時檢查 DB：
    ```sql
-   SELECT id, text, is_notified FROM todos ORDER BY created_at DESC LIMIT 5;
-   SELECT job_id, status, sent_at FROM email_job_logs ORDER BY created_at DESC LIMIT 5;
+   SELECT id, task_name, is_notified FROM todos ORDER BY created_at DESC LIMIT 5;
+   SELECT triggered_at, total_found, sent_count, source, details
+     FROM email_job_logs ORDER BY created_at DESC LIMIT 5;
    ```
-   對應 todo 的 `is_notified` 應為 `true`、`email_job_logs` 有一筆 status = `sent`。
+   對應 todo 的 `is_notified` 應為 `true`、`email_job_logs` 有一筆 `source = 'bullmq'`、`details[0]->>'status' = 'sent'`。
 5. 重新整理編輯頁：該 todo 仍然存在（沒有被 reminder 流程意外覆蓋）。
 
 ### 5.4 花費分帳 + 成員刪除阻擋
@@ -119,9 +131,9 @@ pnpm dev
 
 ## 6. 上線前 smoke
 
-- [ ] `pnpm -r build` 全部成功
-- [ ] `apps/web/dist/` 可以 `pnpm --filter @trip-planner/web preview` 起得來，且同樣打到 `http://localhost:3000` 正常
-- [ ] `apps/api` 在 production 模式跑（`NODE_ENV=production pnpm --filter @trip-planner/api start`），不再吐 Zod env 錯誤
+- [ ] `npx turbo run build` 全部成功（或 `npm run build --workspaces --if-present`）
+- [ ] `apps/web/dist/` 可以 `npm run preview -w @trip-planner/web` 起得來，且同樣打到 `http://localhost:3000` 正常
+- [ ] `apps/api` 在 production 模式跑（`NODE_ENV=production npm run start -w @trip-planner/api`），不再吐 Zod env 錯誤
 - [ ] Brevo 的 API key 確認是 production 專用（不是 sandbox），寄一封實驗信
 - [ ] JWT_SECRET 至少 32 bytes 的隨機字串，**不要**和 dev 同值
 - [ ] 反向代理（nginx / Caddy）同 origin 服務 `/` → web dist 與 `/api/*` → 3000；這樣 `tp_admin` cookie 不需要 cross-site 設定

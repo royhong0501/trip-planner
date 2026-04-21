@@ -1,6 +1,6 @@
 import { createApp } from './app.js';
 import { env } from './config/env.js';
-import { pool } from './db/client.js';
+import { prisma } from './db/client.js';
 import { redis } from './cache/redis.js';
 import { closeReminderQueue, ensureReminderWorker } from './queue/reminderQueue.js';
 
@@ -8,7 +8,7 @@ async function main() {
   const app = createApp();
 
   // Fire up the embedded reminder worker in dev/single-process deployments.
-  // In production you'll likely run the worker separately via `pnpm worker:reminder`.
+  // In production you'll likely run the worker separately via `npm run worker:reminder`.
   if (env.NODE_ENV !== 'test') {
     ensureReminderWorker();
   }
@@ -22,7 +22,7 @@ async function main() {
     server.close();
     await closeReminderQueue().catch((err) => console.error('[queue] close error', err));
     await redis.quit().catch(() => redis.disconnect());
-    await pool.end().catch((err) => console.error('[pg] close error', err));
+    await prisma.$disconnect().catch((err) => console.error('[prisma] close error', err));
     process.exit(0);
   };
 

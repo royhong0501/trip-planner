@@ -1,9 +1,7 @@
 import 'dotenv/config';
 import bcrypt from 'bcrypt';
-import { eq } from 'drizzle-orm';
 import { env } from '../config/env.js';
-import { db, pool } from './client.js';
-import { adminUsers } from './schema/index.js';
+import { prisma } from './client.js';
 
 async function main() {
   const email = env.ADMIN_SEED_EMAIL;
@@ -14,18 +12,21 @@ async function main() {
     return;
   }
 
-  const existing = await db.select().from(adminUsers).where(eq(adminUsers.email, email)).limit(1);
-  if (existing.length > 0) {
+  const existing = await prisma.adminUser.findUnique({
+    where: { email },
+    select: { id: true },
+  });
+  if (existing) {
     console.log(`[seed] admin ${email} already exists; no changes made.`);
     return;
   }
 
   const passwordHash = await bcrypt.hash(password, 12);
-  const [user] = await db
-    .insert(adminUsers)
-    .values({ email, passwordHash })
-    .returning({ id: adminUsers.id, email: adminUsers.email });
-  console.log(`[seed] created admin ${user?.email ?? email} (id=${user?.id ?? '??'})`);
+  const user = await prisma.adminUser.create({
+    data: { email, passwordHash },
+    select: { id: true, email: true },
+  });
+  console.log(`[seed] created admin ${user.email} (id=${user.id})`);
 }
 
 main()
@@ -34,5 +35,5 @@ main()
     process.exitCode = 1;
   })
   .finally(async () => {
-    await pool.end();
+    await prisma.$disconnect();
   });

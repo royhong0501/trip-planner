@@ -1,20 +1,25 @@
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { Pool, type PoolConfig } from 'pg';
+import { PrismaClient } from '@prisma/client';
 import { env } from '../config/env.js';
-import * as schema from './schema/index.js';
 
-const poolConfig: PoolConfig = {
-  connectionString: env.DATABASE_URL,
-  max: 10,
-  idleTimeoutMillis: 30_000,
-};
+/**
+ * Shared Prisma client. In dev we cache it on `globalThis` so `tsx watch`
+ * hot-reloads don't leak connections; in prod we always construct fresh.
+ *
+ * For interactive transactions (including SELECT ... FOR UPDATE patterns),
+ * call `prisma.$transaction(async (tx) => { ... })` directly — the `tx`
+ * argument has the same type as `prisma` minus the nested $transaction method.
+ */
+const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
-export const pool = new Pool(poolConfig);
+export const prisma =
+  globalForPrisma.prisma ??
+  new PrismaClient({
+    datasources: { db: { url: env.DATABASE_URL } },
+    log: ['warn', 'error'],
+  });
 
-pool.on('error', (err) => {
-  console.error('[pg] unexpected idle client error', err);
-});
+if (env.NODE_ENV !== 'production') {
+  globalForPrisma.prisma = prisma;
+}
 
-export const db = drizzle(pool, { schema });
-export type Db = typeof db;
-export { schema };
+export type Prisma = typeof prisma;

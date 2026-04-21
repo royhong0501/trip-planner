@@ -1,5 +1,4 @@
 node_modules
-.pnpm-store
 .turbo
 dist
 build
@@ -15,7 +14,7 @@ desktop.ini
 .idea
 tsconfig.tsbuildinfo
 
-# Drizzle journal kept, but local dev databases ignored
+# Local dev databases ignored
 pgdata
 redisdata
 minio-data

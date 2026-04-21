@@ -1,9 +1,7 @@
 import bcrypt from 'bcrypt';
-import { eq } from 'drizzle-orm';
 import jwt, { type JwtPayload, type SignOptions } from 'jsonwebtoken';
 import { env } from '../config/env.js';
-import { db } from '../db/client.js';
-import { adminUsers } from '../db/schema/index.js';
+import { prisma } from '../db/client.js';
 import { HttpError } from '../utils/httpError.js';
 import { redis } from '../cache/redis.js';
 
@@ -64,17 +62,13 @@ export async function revokeToken(decoded: AdminTokenPayload): Promise<void> {
 }
 
 export async function findAdminByEmail(email: string) {
-  const [row] = await db
-    .select()
-    .from(adminUsers)
-    .where(eq(adminUsers.email, email.trim().toLowerCase()))
-    .limit(1);
-  return row ?? null;
+  return prisma.adminUser.findUnique({
+    where: { email: email.trim().toLowerCase() },
+  });
 }
 
 export async function findAdminById(id: string) {
-  const [row] = await db.select().from(adminUsers).where(eq(adminUsers.id, id)).limit(1);
-  return row ?? null;
+  return prisma.adminUser.findUnique({ where: { id } });
 }
 
 function cryptoRandomId(): string {

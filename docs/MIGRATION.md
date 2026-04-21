@@ -48,16 +48,24 @@ grep -Ev '^(CREATE POLICY|ALTER TABLE .+ (ENABLE|DISABLE|FORCE) ROW LEVEL SECURI
 
 - `CREATE EXTENSION` → 只保留 `pgcrypto`（for `gen_random_uuid()`）、`uuid-ossp`；其他（`vault`、`pgjwt`、`pg_graphql`…）刪掉。
 - 參照 `auth.users` 的 FK → 這裡 `admin_users` 由我們自己的表取代，舊資料只搬 `trip_participants.user_id` 即可（可保留或清為 NULL）。
-- 任何 `EXECUTE FUNCTION public.create_expense_with_splits(...)` 的 RPC 定義 → 刪掉，後端已改用 Drizzle transaction。
+- 任何 `EXECUTE FUNCTION public.create_expense_with_splits(...)` 的 RPC 定義 → 刪掉，後端已改用 Prisma `$transaction`。
 
 ## 4. 建立新 DB 結構
 
-**不要直接套用清理後的舊 schema**——新 monorepo 用 Drizzle 管結構，欄位型別和 constraint 已經微調（例如 `numeric(14,2)` / `numeric(18,8)`、check constraint、`ON DELETE RESTRICT` for `payerId`）。
+**不要直接套用清理後的舊 schema**——新 monorepo 用 Prisma 管結構，欄位型別和 constraint 已經微調（例如 `@db.Decimal(14,2)` / `@db.Decimal(18,8)`、check constraint、`onDelete: Restrict` for `payerId`）。
 
 ```bash
-pnpm db:migrate     # drizzle-kit push
-pnpm db:seed        # 建立第一個 admin 帳號（用 ADMIN_BOOTSTRAP_EMAIL / ADMIN_BOOTSTRAP_PASSWORD）
+# 本機第一次建表（development）
+npm run db:generate -w @trip-planner/api   # prisma migrate dev
+
+# 部署環境套 migration + 追加 CHECK constraint
+npm run db:migrate -w @trip-planner/api    # prisma migrate deploy && applyCheckConstraints
+
+# 建立第一個 admin 帳號（讀 ADMIN_SEED_EMAIL / ADMIN_SEED_PASSWORD）
+npm run db:seed -w @trip-planner/api
 ```
+
+> `db:migrate` 會先跑 `prisma migrate deploy`，再跑 `scripts/applyCheckConstraints.ts`（idempotent）。Prisma DSL 無法表達 CHECK constraint，所以我們抽到 `prisma/sql/check_constraints.sql` 由這支 script 套用。
 
 ## 5. 匯入舊資料
 
@@ -73,7 +81,7 @@ psql "$NEW_DB_URL" -f old-public-data.sql
 |------|------|------|
 | `relation "auth.users" does not exist` | 舊 data 有 FK 到 Supabase `auth.users` | 匯入前先 `psql -c "ALTER TABLE trip_participants DROP CONSTRAINT IF EXISTS trip_participants_user_id_fkey;"` |
 | `invalid input syntax for type numeric` | `amount_total` 來源是 `numeric` 無 scale 限制 | 已手動 `ROUND` 一次再匯入，或直接讓 Postgres 轉型（14,2 會四捨五入） |
-| `column "job_id" of relation "todos" does not exist` | 舊版沒有 BullMQ 對應欄位 | 正常。新欄位在 Drizzle migration 中就是 `NULL`，匯入後現有提醒自動重新排程（見 §7） |
+| `column "job_id" of relation "todos" does not exist` | 舊版沒有 BullMQ 對應欄位 | 正常。新欄位在 Prisma migration 中就是 `NULL`，匯入後現有提醒自動重新排程（見 §7） |
 | `violates check constraint "trips_category_check"` | 舊資料可能有空字串 | `UPDATE trips SET category = 'international' WHERE category = '';` 再重試 |
 
 ## 6. Storage（封面圖、首頁影片、LOGO、輪播）
@@ -113,7 +121,7 @@ UPDATE homepage_settings
 舊版提醒由 Supabase Cron + Edge Function 依 `todos.remind_time` 檢查觸發。新版用 BullMQ，每筆提醒要有對應的 delayed job 才會寄信。
 
 ```bash
-pnpm --filter @trip-planner/api exec tsx scripts/reseedReminders.ts
+npm run -w @trip-planner/api exec -- tsx scripts/reseedReminders.ts
 ```
 
 這支 script 掃描 `todos` 表，對 `remind_time > now()` 且 `is_notified = false` 的每一筆呼叫 `enqueueReminder(...)`，把 jobId 寫回 `todos.job_id`。

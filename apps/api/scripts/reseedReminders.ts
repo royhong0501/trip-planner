@@ -9,26 +9,27 @@
  * with the same jobId before adding a new one.
  *
  * Usage:
- *   pnpm --filter @trip-planner/api exec tsx scripts/reseedReminders.ts
+ *   npm run -w @trip-planner/api exec -- tsx scripts/reseedReminders.ts
  */
 
 import 'dotenv/config';
-import { and, eq, gt } from 'drizzle-orm';
-import { db } from '../src/db/client.js';
-import { todos } from '../src/db/schema/todos.js';
+import { prisma } from '../src/db/client.js';
 import { enqueueReminder, reminderQueue } from '../src/queue/reminderQueue.js';
 
 async function main(): Promise<void> {
   const now = new Date();
-  const pending = await db
-    .select({
-      id: todos.id,
-      tripId: todos.tripId,
-      reminderTime: todos.reminderTime,
-      jobId: todos.jobId,
-    })
-    .from(todos)
-    .where(and(eq(todos.isNotified, false), gt(todos.reminderTime, now)));
+  const pending = await prisma.todo.findMany({
+    where: {
+      isNotified: false,
+      reminderTime: { gt: now },
+    },
+    select: {
+      id: true,
+      tripId: true,
+      reminderTime: true,
+      jobId: true,
+    },
+  });
 
   console.log(`[reseedReminders] ${pending.length} pending reminder(s) in window`);
 
@@ -45,7 +46,11 @@ async function main(): Promise<void> {
         delayMs,
       });
       if (!row.jobId) {
-        await db.update(todos).set({ jobId }).where(eq(todos.id, row.id));
+        await prisma.todo.update({
+          where: { id: row.id },
+          data: { jobId },
+          select: { id: true },
+        });
       }
       ok += 1;
     } catch (err) {
@@ -56,6 +61,7 @@ async function main(): Promise<void> {
 
   console.log(`[reseedReminders] done. ok=${ok} fail=${fail}`);
   await reminderQueue.close();
+  await prisma.$disconnect();
   process.exit(fail === 0 ? 0 : 1);
 }
 

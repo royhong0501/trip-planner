@@ -1,12 +1,10 @@
 import { Router } from 'express';
-import { asc, eq } from 'drizzle-orm';
 import type { AdminUser } from '@trip-planner/shared-types';
 import {
   createAdminUserSchema,
   updateAdminUserPasswordSchema,
 } from '@trip-planner/shared-schema';
-import { db } from '../db/client.js';
-import { adminUsers } from '../db/schema/index.js';
+import { prisma } from '../db/client.js';
 import { requireAdmin } from '../middleware/requireAdmin.js';
 import { validate } from '../middleware/validate.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
@@ -17,7 +15,13 @@ export const adminUsersRouter = Router();
 
 adminUsersRouter.use(requireAdmin);
 
-function toDto(row: typeof adminUsers.$inferSelect): AdminUser {
+type PrismaAdminUserRecord = {
+  id: string;
+  email: string;
+  createdAt: Date;
+};
+
+function toDto(row: PrismaAdminUserRecord): AdminUser {
   return {
     id: row.id,
     email: row.email,
@@ -28,7 +32,9 @@ function toDto(row: typeof adminUsers.$inferSelect): AdminUser {
 adminUsersRouter.get(
   '/',
   asyncHandler(async (_req, res) => {
-    const rows = await db.select().from(adminUsers).orderBy(asc(adminUsers.createdAt));
+    const rows = await prisma.adminUser.findMany({
+      orderBy: { createdAt: 'asc' },
+    });
     res.json(rows.map(toDto));
   }),
 );
@@ -39,19 +45,16 @@ adminUsersRouter.post(
   asyncHandler(async (req, res) => {
     const { email, password } = req.body as { email: string; password: string };
     const normalized = email.trim().toLowerCase();
-    const existing = await db
-      .select({ id: adminUsers.id })
-      .from(adminUsers)
-      .where(eq(adminUsers.email, normalized))
-      .limit(1);
-    if (existing.length > 0) throw HttpError.conflict('此 Email 已被使用');
+    const existing = await prisma.adminUser.findUnique({
+      where: { email: normalized },
+      select: { id: true },
+    });
+    if (existing) throw HttpError.conflict('此 Email 已被使用');
 
     const passwordHash = await hashPassword(password);
-    const [row] = await db
-      .insert(adminUsers)
-      .values({ email: normalized, passwordHash })
-      .returning();
-    if (!row) throw new Error('Failed to insert admin user');
+    const row = await prisma.adminUser.create({
+      data: { email: normalized, passwordHash },
+    });
     res.status(201).json(toDto(row));
   }),
 );
@@ -69,13 +72,16 @@ adminUsersRouter.patch(
     const userId = req.params.userId as string;
     const { password } = req.body as { password: string };
     const passwordHash = await hashPassword(password);
-    const [row] = await db
-      .update(adminUsers)
-      .set({ passwordHash, updatedAt: new Date() })
-      .where(eq(adminUsers.id, userId))
-      .returning();
-    if (!row) throw HttpError.notFound('使用者不存在');
-    res.json(toDto(row));
+    try {
+      const row = await prisma.adminUser.update({
+        where: { id: userId },
+        data: { passwordHash, updatedAt: new Date() },
+      });
+      res.json(toDto(row));
+    } catch (err) {
+      if (isNotFoundError(err)) throw HttpError.notFound('使用者不存在');
+      throw err;
+    }
   }),
 );
 
@@ -86,11 +92,21 @@ adminUsersRouter.delete(
     if (req.admin?.sub === userId) {
       throw HttpError.badRequest('無法刪除自己的帳號');
     }
-    const deleted = await db
-      .delete(adminUsers)
-      .where(eq(adminUsers.id, userId))
-      .returning({ id: adminUsers.id });
-    if (deleted.length === 0) throw HttpError.notFound('使用者不存在');
-    res.status(204).end();
+    try {
+      await prisma.adminUser.delete({ where: { id: userId }, select: { id: true } });
+      res.status(204).end();
+    } catch (err) {
+      if (isNotFoundError(err)) throw HttpError.notFound('使用者不存在');
+      throw err;
+    }
   }),
 );
+
+function isNotFoundError(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    'code' in err &&
+    (err as { code?: string }).code === 'P2025'
+  );
+}

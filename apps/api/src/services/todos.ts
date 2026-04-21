@@ -1,7 +1,5 @@
-import { eq } from 'drizzle-orm';
 import type { TodoItem } from '@trip-planner/shared-types';
-import { db } from '../db/client.js';
-import { todos as todoRemindersTable } from '../db/schema/index.js';
+import { prisma } from '../db/client.js';
 import { enqueueReminder, cancelReminder } from '../queue/reminderQueue.js';
 
 /**
@@ -23,9 +21,9 @@ export async function upsertTodoReminder(tripId: string, todo: TodoItem): Promis
   const delayMs = Math.max(0, remindAt.getTime() - Date.now());
   const jobId = `reminder:${todo.id}`;
 
-  await db
-    .insert(todoRemindersTable)
-    .values({
+  await prisma.todo.upsert({
+    where: { id: todo.id },
+    create: {
       id: todo.id,
       tripId,
       taskName: todo.text,
@@ -34,19 +32,17 @@ export async function upsertTodoReminder(tripId: string, todo: TodoItem): Promis
       isNotified: false,
       retryCount: 0,
       jobId,
-    })
-    .onConflictDoUpdate({
-      target: todoRemindersTable.id,
-      set: {
-        tripId,
-        taskName: todo.text,
-        reminderTime: remindAt,
-        assignedParticipantId: todo.assignedParticipantId ?? null,
-        isNotified: false,
-        retryCount: 0,
-        jobId,
-      },
-    });
+    },
+    update: {
+      tripId,
+      taskName: todo.text,
+      reminderTime: remindAt,
+      assignedParticipantId: todo.assignedParticipantId ?? null,
+      isNotified: false,
+      retryCount: 0,
+      jobId,
+    },
+  });
 
   await enqueueReminder({
     jobId,
@@ -58,5 +54,5 @@ export async function upsertTodoReminder(tripId: string, todo: TodoItem): Promis
 
 export async function removeTodoReminder(todoId: string): Promise<void> {
   await cancelReminder(`reminder:${todoId}`);
-  await db.delete(todoRemindersTable).where(eq(todoRemindersTable.id, todoId));
+  await prisma.todo.deleteMany({ where: { id: todoId } });
 }
