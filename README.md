@@ -1,7 +1,5 @@
 # 旅遊規劃 App — Monorepo
 
-前後端分離重構版。原前端在 `C:/Users/PC/programing/trip`（分支 `develop_roy`）。
-
 - `apps/web/`：Vite + React + TS（原 `trip-planner-buddy-50-main`）
 - `apps/api/`：Express 5 + Prisma + Redis + BullMQ
 - `packages/shared-types/`、`packages/shared-schema/`、`packages/api-client/`
