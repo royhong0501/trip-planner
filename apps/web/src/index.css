@@ -1,0 +1,245 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* 全站大背景 #F7F3F0 */
+    --background: 26 30% 95.5%;
+    /* 主內文／表格內容 #5C4F45 */
+    --foreground: 26 14% 32%;
+
+    /* 表格／卡片底色 #FFFFFF */
+    --card: 0 0% 100%;
+    --card-foreground: 26 14% 32%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 26 14% 32%;
+
+    /* 頁首、側欄等主色塊 #D6C5B3 */
+    --primary: 31 30% 77%;
+    --primary-foreground: 26 14% 32%;
+
+    --secondary: 31 30% 77%;
+    --secondary-foreground: 26 14% 32%;
+
+    /* 動作按鈕（Button default）#B8A390 */
+    --action: 28 22% 64%;
+    --action-foreground: 0 0% 100%;
+
+    --muted: 26 18% 92%;
+    --muted-foreground: 26 12% 45%;
+
+    --accent: 26 22% 93%;
+    --accent-foreground: 26 14% 32%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 26 14% 88%;
+    --input: 26 14% 88%;
+    --ring: 28 22% 55%;
+
+    --radius: 0.5rem;
+
+    /* 表格標題列 #D6C5B3（與 primary 同色，獨立 token 方便維護） */
+    --table: 0 0% 100%;
+    --table-foreground: 26 14% 32%;
+    --table-header: 31 30% 77%;
+    --table-header-foreground: 26 14% 32%;
+
+    --sidebar-background: 31 30% 77%;
+    --sidebar-foreground: 26 14% 32%;
+    --sidebar-primary: 26 14% 32%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 26 22% 93%;
+    --sidebar-accent-foreground: 26 14% 32%;
+    --sidebar-border: 26 14% 88%;
+    --sidebar-ring: 28 22% 55%;
+
+    --hero-overlay: linear-gradient(to top, hsla(26, 11%, 20%, 0.75) 0%, transparent 60%);
+    --gold-gradient: linear-gradient(135deg, hsl(31, 30%, 77%), hsl(26 22% 93%));
+    --navy-gradient: linear-gradient(135deg, hsl(26, 14%, 32%), hsl(31, 30%, 60%));
+  }
+
+  .dark {
+    --background: 26 15% 10%;
+    --foreground: 30 19% 90%;
+    --card: 26 15% 14%;
+    --card-foreground: 30 19% 90%;
+    --popover: 26 15% 14%;
+    --popover-foreground: 30 19% 90%;
+    --primary: 31 30% 77%;
+    --primary-foreground: 26 11% 37%;
+    --secondary: 26 15% 25%;
+    --secondary-foreground: 30 19% 90%;
+    --action: 28 22% 58%;
+    --action-foreground: 0 0% 100%;
+    --muted: 26 15% 18%;
+    --muted-foreground: 30 15% 55%;
+    --accent: 31 30% 77%;
+    --accent-foreground: 26 11% 37%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 26 15% 22%;
+    --input: 26 15% 22%;
+    --ring: 28 22% 50%;
+    --table: 26 15% 16%;
+    --table-foreground: 30 19% 90%;
+    --table-header: 31 25% 45%;
+    --table-header-foreground: 30 19% 95%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans;
+    font-family: 'Noto Sans TC', sans-serif;
+  }
+}
+
+@layer components {
+  /** 富文字（行程備註等）內嵌表格：白底、標題列 #D6C5B3、內文 #5C4F45 */
+  .rich-html table {
+    width: 100%;
+    border-collapse: collapse;
+    background-color: hsl(var(--table));
+    color: hsl(var(--table-foreground));
+    font-size: 0.875rem;
+    line-height: 1.5;
+    border: 1px solid hsl(var(--border));
+    border-radius: calc(var(--radius) - 2px);
+    overflow: hidden;
+    margin: 0.5rem 0;
+  }
+  .rich-html th {
+    background-color: hsl(var(--table-header));
+    color: hsl(var(--table-header-foreground));
+    font-weight: 500;
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid hsl(var(--border));
+  }
+  .rich-html td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid hsl(var(--border));
+    vertical-align: top;
+  }
+  .rich-html tbody tr:last-child td {
+    border-bottom: none;
+  }
+  .rich-html tbody tr:nth-child(even) td {
+    background-color: hsl(var(--muted) / 0.35);
+  }
+}
+
+@layer utilities {
+  .text-gold-gradient {
+    background: var(--gold-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .bg-gold-gradient {
+    background: var(--gold-gradient);
+  }
+
+  .bg-navy-gradient {
+    background: var(--navy-gradient);
+  }
+
+  .bg-hero-overlay {
+    background: var(--hero-overlay);
+  }
+
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /** 行程詳情「每日行程」橫向捲動：保留可見捲軸，桌面較易拖曳／辨識可橫滑 */
+  .itinerary-x-scroll {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
+  }
+  .itinerary-x-scroll::-webkit-scrollbar {
+    height: 10px;
+  }
+  .itinerary-x-scroll::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.35);
+    border-radius: 9999px;
+  }
+  .itinerary-x-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   Google Maps Places Autocomplete Dropdown  (.pac-container)
+   Used by the legacy Autocomplete widget and as a global reset so
+   Google's default grey/white inconsistencies are overridden.
+   The PlaceAutocompleteElement (Places API New) receives its styles via
+   injected shadow-DOM <style> in PlacesAutocomplete.tsx.
+───────────────────────────────────────────────────────────────────────────── */
+.pac-container {
+  background-color: #ffffff;
+  border: 1px solid #E5DDD5;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  margin-top: 4px;
+  overflow: hidden;
+  padding: 4px 0;
+  font-family: 'Noto Sans TC', sans-serif;
+  z-index: 9999;
+}
+
+/* Hide the "Powered by Google" footer logo */
+.pac-container::after {
+  display: none !important;
+}
+
+.pac-item {
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #374151;
+  cursor: pointer;
+  border-top: 1px solid #F3F0ED;
+}
+.pac-item:first-child {
+  border-top: none;
+}
+.pac-item:hover,
+.pac-item-selected {
+  background-color: #F7F3F0;
+  color: #1F2937;
+}
+
+/* Main place name */
+.pac-item-query {
+  font-size: 13px;
+  font-weight: 500;
+  color: #1F2937;
+}
+
+/* Highlighted matched portion */
+.pac-matched {
+  font-weight: 700;
+  color: #5C4F45;
+}
+
+/* Hide the default grey location-pin icon */
+.pac-icon {
+  display: none;
+}

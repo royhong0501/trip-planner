@@ -1,0 +1,21 @@
+node_modules
+.pnpm-store
+.turbo
+dist
+build
+coverage
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+desktop.ini
+.vite
+.vscode/settings.json
+.idea
+tsconfig.tsbuildinfo
+
+# Drizzle journal kept, but local dev databases ignored
+pgdata
+redisdata
+minio-data
