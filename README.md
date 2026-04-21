@@ -44,9 +44,9 @@ apps/
       reseedReminders.ts          重建 BullMQ delayed jobs
     src/db/seed.ts          初始 admin
 packages/
-  shared-types/    Trip / Expense / TodoItem ...
-  shared-schema/   Zod schemas 前後端共用
-  api-client/      前端用的 typed fetch client
+  shared-types/    Trip / Expense / TodoItem ...= 名詞（DTO，資料形狀）
+  shared-schema/   Zod schemas 前後端共用= 規則（Validator，這個形狀對不對）
+  api-client/      前端用的 typed fetch client= 動詞（Client，怎麼把這個形狀送過去 / 拿回來）
 docker-compose.yml postgres + redis + minio + minio bucket 自動建立
 ```
 
