@@ -284,6 +284,7 @@ packages/
 ```
 docs/
 ├── PROJECT_STRUCTURE.md   你正在讀的這份
+├── DATABASE.md            8 張表的欄位、設計邏輯、JSONB、CHECK、級聯、索引、UUID 策略
 ├── MIGRATION.md           兩段式遷移：Supabase→自架 PG、Express→Nest.js
 └── VERIFICATION.md        上線前驗證 checklist
 ```

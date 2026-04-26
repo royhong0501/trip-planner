@@ -172,6 +172,7 @@ apps/api/src/
 | 文件 | 內容 |
 |---|---|
 | [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md) | 完整目錄結構、Nest.js 模組職責、HTTP 端點 ↔ Controller 對照、一個請求穿越系統的路徑、速記表 |
+| [`docs/DATABASE.md`](docs/DATABASE.md) | 8 張表的詳細欄位、設計邏輯、JSONB 用法、CHECK 約束、外鍵級聯策略、Decimal 精度、UUID 策略、常用維運查詢 |
 | [`docs/VERIFICATION.md`](docs/VERIFICATION.md) | 上線前驗證 checklist：docker / DB / typecheck / e2e / 端到端使用者流程 / production smoke |
 | [`docs/MIGRATION.md`](docs/MIGRATION.md) | 兩段式遷移紀錄：①舊 Supabase → 自架 Postgres（資料遷移），②Express 5 → Nest.js（框架遷移） |
 
