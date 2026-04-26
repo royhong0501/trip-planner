@@ -10,11 +10,13 @@ import 'dotenv/config';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { prisma } from '../src/db/client.js';
+import { PrismaClient } from '@prisma/client';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const SQL_PATH = resolve(__dirname, '../prisma/sql/check_constraints.sql');
+
+const prisma = new PrismaClient();
 
 function splitStatements(sql: string): string[] {
   return sql

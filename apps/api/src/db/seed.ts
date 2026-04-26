@@ -1,9 +1,14 @@
 import 'dotenv/config';
 import bcrypt from 'bcrypt';
-import { env } from '../config/env.js';
-import { prisma } from './client.js';
+import { PrismaClient } from '@prisma/client';
+import { parseEnv } from '../config/env.schema.js';
 
-async function main() {
+const env = parseEnv();
+const prisma = new PrismaClient({
+  datasources: { db: { url: env.DATABASE_URL } },
+});
+
+async function main(): Promise<void> {
   const email = env.ADMIN_SEED_EMAIL;
   const password = env.ADMIN_SEED_PASSWORD;
 
