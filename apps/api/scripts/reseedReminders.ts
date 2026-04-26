@@ -5,16 +5,54 @@
  * future and `is_notified = false`, then enqueues / re-enqueues a
  * `reminder:{id}` job and writes the returned jobId back to the row.
  *
- * Safe to run repeatedly — `enqueueReminder` removes any existing job
- * with the same jobId before adding a new one.
+ * Safe to run repeatedly — adding the same jobId removes the prior copy first.
  *
  * Usage:
  *   npm run -w @trip-planner/api exec -- tsx scripts/reseedReminders.ts
  */
 
 import 'dotenv/config';
-import { prisma } from '../src/db/client.js';
-import { enqueueReminder, reminderQueue } from '../src/queue/reminderQueue.js';
+import { PrismaClient } from '@prisma/client';
+import { Queue } from 'bullmq';
+import { Redis } from 'ioredis';
+import { parseEnv } from '../src/config/env.schema.js';
+
+const env = parseEnv();
+const prisma = new PrismaClient({
+  datasources: { db: { url: env.DATABASE_URL } },
+});
+
+const connection = new Redis(env.REDIS_URL, {
+  maxRetriesPerRequest: null,
+  enableReadyCheck: false,
+});
+
+const reminderQueue = new Queue('trip-reminders', {
+  connection,
+  defaultJobOptions: {
+    attempts: 5,
+    backoff: { type: 'exponential', delay: 60 * 1000 },
+    removeOnComplete: { age: 7 * 24 * 60 * 60, count: 1000 },
+    removeOnFail: { age: 30 * 24 * 60 * 60 },
+  },
+});
+
+async function enqueueReminder(params: {
+  jobId: string;
+  todoId: string;
+  tripId: string;
+  delayMs: number;
+}): Promise<void> {
+  const existing = await reminderQueue.getJob(params.jobId);
+  if (existing) {
+    await existing.remove().catch(() => undefined);
+  }
+  await reminderQueue.add(
+    'send-reminder',
+    { todoId: params.todoId, tripId: params.tripId },
+    { jobId: params.jobId, delay: Math.max(0, params.delayMs) },
+  );
+}
 
 async function main(): Promise<void> {
   const now = new Date();
@@ -61,6 +99,7 @@ async function main(): Promise<void> {
 
   console.log(`[reseedReminders] done. ok=${ok} fail=${fail}`);
   await reminderQueue.close();
+  await connection.quit().catch(() => connection.disconnect());
   await prisma.$disconnect();
   process.exit(fail === 0 ? 0 : 1);
 }
