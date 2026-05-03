@@ -1,0 +1,46 @@
+# Build / dependency artifacts — installed inside the image
+node_modules
+**/node_modules
+dist
+**/dist
+build
+**/build
+.turbo
+**/.turbo
+coverage
+**/coverage
+*.tsbuildinfo
+**/*.tsbuildinfo
+
+# Local-only data volumes (mounted by docker-compose)
+pgdata
+redisdata
+minio-data
+
+# Secrets / local env — never bake into images
+.env
+.env.local
+.env.*.local
+**/.env
+**/.env.local
+**/.env.*.local
+
+# VCS / IDE / OS
+.git
+.gitignore
+.github
+.vscode
+.idea
+.DS_Store
+desktop.ini
+*.log
+
+# Tests / playwright artifacts
+playwright-report
+test-results
+
+# Docker bookkeeping
+Dockerfile
+**/Dockerfile
+.dockerignore
+docker-compose*.yml

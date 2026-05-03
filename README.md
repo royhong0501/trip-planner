@@ -14,35 +14,45 @@
 
 ## 快速啟動
 
+> **預設流程是 100% Docker**：postgres / redis / minio / api / web 全部跑在容器裡，host 端只需要 Docker Desktop。如果想 host 端跑 `npm run dev`，請看下方〈替代：host 端開發〉。
+
 ```bash
-# 0. 環境變數（先複製再依需要修改）
+# 0. 環境變數（先複製，必要時改 JWT_SECRET / API_PORT 等）
 cp .env.example .env
 
-# 1. 啟動 postgres / redis / minio（含自動建 bucket）
-docker compose up -d
+# 1. 起所有服務（含 api、web）
+docker compose up -d --build
 
-# 2. 安裝依賴（Node 20.11+，npm 10+ 內建 workspaces）
-npm install
+# 2. 第一次：建 schema + 種第一個 admin（schema 改過後也要跑）
+docker compose --profile init rm -f db-init      # 清舊容器避免殘留網路 ID
+docker compose --profile init up db-init
 
-# 3. 建立 schema + 種第一個 admin
-#    開發初次：
-npm run db:generate -w @trip-planner/api    # prisma migrate dev（互動）
-#    或部署時直接套既有 migration + CHECK constraints：
-# npm run db:migrate -w @trip-planner/api
-npm run db:seed -w @trip-planner/api
-
-# 4. 同時跑 web (5173) 與 api (3000)
-npm run dev
-```
-
-驗證 API 啟動：
-
-```bash
-curl http://localhost:3000/health
+# 3. 驗證
+docker compose ps
+curl http://localhost:${API_PORT:-3000}/health
 # {"status":"ok","env":"development","time":"..."}
 ```
 
-驗證前端：開瀏覽器到 `http://localhost:5173`。
+開瀏覽器到 `http://localhost:5173`，後端 API 透過 Vite dev proxy 走 `/api/*` → `http://api:3000`（容器內網），瀏覽器只看得到 `localhost:5173`。
+
+> **Windows 上 3000 / 3100 卡住？** Hyper-V/WSL2 會預留一段動態 port range（用 `netsh interface ipv4 show excludedportrange protocol=tcp` 查）。在 `.env` 加 `API_PORT=4000`（任何不在 excluded range 的 port 都行，5173 通常沒事）即可，容器內監聽的依舊是 3000，CORS / proxy / 端到端都不用改。
+
+完整 docker 化的設計考量、踩到的坑、學習筆記，請見 [`docs/DOCKER.md`](docs/DOCKER.md)。
+
+### 替代：host 端開發
+
+```bash
+# 0. 同上 cp .env.example .env
+# 1. 只起基礎服務
+docker compose up -d postgres redis minio minio-init
+# 2. host 端跑 dev
+npm install
+npm run db:generate -w @trip-planner/api    # 互動建 migration（首次）
+npm run db:seed -w @trip-planner/api
+npm run dev
+```
+
+> host 端跑時的 URL 走 `localhost:5432 / 6379 / 9000`（`.env` 預設值）；容器內走 `postgres:5432` 等 service name，由 `docker-compose.yml` 的 `environment:` 區塊覆蓋。兩條路互不打架。
 
 ---
 
@@ -58,7 +68,10 @@ trip-planner/
 │   ├── shared-schema/      zod 驗證 schema
 │   └── api-client/         前端 typed fetch wrapper
 ├── docs/                   詳細維運文件（見下方索引）
-├── docker-compose.yml      postgres + redis + minio + minio-init
+├── docker-compose.yml      postgres + redis + minio + api + web + db-init
+├── apps/api/Dockerfile     api 多階段 image（base/deps/dev/build/prod）
+├── apps/web/Dockerfile     web 多階段 image（dev / nginx prod）
+├── .dockerignore           build context 過濾（避免 secrets / 巨檔進 image）
 ├── package.json            npm workspaces 主檔
 ├── turbo.json              Turborepo 任務 pipeline
 ├── tsconfig.base.json      TS 共用設定（strict、ES2022、NodeNext）
@@ -114,7 +127,7 @@ trip-planner/
 
 | 腳本 | 行為 |
 |---|---|
-| `dev` | `tsx watch src/main.ts` — 熱重載開發伺服器 |
+| `dev` | `node --import @swc-node/register/esm-register --watch src/main.ts` — 用 SWC 載入 TS、Node 內建 watch（NestJS DI 需要 `design:paramtypes` metadata，tsx/esbuild 不可靠 emit，故走 SWC） |
 | `start` | `node dist/main.js` — production 模式（先 `build`） |
 | `build` | `prisma generate && tsc -p tsconfig.json` |
 | `typecheck` | `tsc --noEmit` |
@@ -173,6 +186,7 @@ apps/api/src/
 |---|---|
 | [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md) | 完整目錄結構、Nest.js 模組職責、HTTP 端點 ↔ Controller 對照、一個請求穿越系統的路徑、速記表 |
 | [`docs/DATABASE.md`](docs/DATABASE.md) | 8 張表的詳細欄位、設計邏輯、JSONB 用法、CHECK 約束、外鍵級聯策略、Decimal 精度、UUID 策略、常用維運查詢 |
+| [`docs/DOCKER.md`](docs/DOCKER.md) | 全 Docker 化的設計考量（多 stage、bind mount + named volume、env URL 切換、SWC for DI metadata）、踩過的坑、日常指令 |
 | [`docs/VERIFICATION.md`](docs/VERIFICATION.md) | 上線前驗證 checklist：docker / DB / typecheck / e2e / 端到端使用者流程 / production smoke |
 | [`docs/MIGRATION.md`](docs/MIGRATION.md) | 兩段式遷移紀錄：①舊 Supabase → 自架 Postgres（資料遷移），②Express 5 → Nest.js（框架遷移） |
 
@@ -187,6 +201,10 @@ apps/api/src/
 | 前端登入後 cookie 沒帶上 | dev 跨埠 cookie / SameSite | 已用 Vite proxy，請確認瀏覽器訪問 `localhost:5173` 而非 `127.0.0.1` |
 | BullMQ 沒寄信 | `ENABLE_EMBEDDED_WORKER=false` 但沒跑 `worker:reminder` | 兩擇一啟用 |
 | 限流訊息變英文 | 自訂 ThrottlerGuard 沒攔截 | 已由 `HttpExceptionFilter` 把 `ThrottlerException` 轉成「太多請求，請稍候再試」 |
+| Docker：`port is already allocated` (3000) | host 上已有程式佔用，或 Hyper-V 預留了 3000 一帶 | `.env` 設 `API_PORT=4000`（或其他不在 `netsh ... show excludedportrange protocol=tcp` 範圍內的 port） |
+| Docker：`network ... not found` 跑 db-init | profile service 殘留容器指到已刪掉的網路 | `docker compose --profile init rm -f db-init` 後再 `up` |
+| Docker：API 回 500 `Cannot read properties of undefined (reading 'list')` | NestJS DI metadata 沒 emit | 確認 dev 腳本走 `@swc-node/register` 而不是 `tsx watch`（見 `docs/DOCKER.md`） |
+| Docker：改 host code 容器沒重載 | Windows/macOS bind mount 不發 inotify 事件 | 確認 compose 的 api/web service 有 `CHOKIDAR_USEPOLLING=true` |
 
 ---
 

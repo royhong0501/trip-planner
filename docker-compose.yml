@@ -1,5 +1,10 @@
-# Local development stack: postgres + redis + minio.
-# Bring up with: docker compose up -d
+# Local dev stack: postgres + redis + minio + api + web (all containerised).
+#
+# Bring everything up:        docker compose up -d --build
+# First-time DB schema + seed: docker compose --profile init up db-init
+# Tear down (keep data):       docker compose down
+# Tear down (wipe volumes):    docker compose down -v
+#
 # Data persists under ./pgdata, ./redisdata, ./minio-data (gitignored).
 
 services:
@@ -11,8 +16,11 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: ${POSTGRES_DB:-trip_planner}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+    # Internal-only by default: api/db-init talk to `postgres:5432` on the
+    # docker network. Avoid host port conflicts. To run psql / Prisma Studio
+    # from the host, add a docker-compose.override.yml with a `ports:` entry.
+    expose:
+      - "5432"
     volumes:
       - ./pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -26,8 +34,10 @@ services:
     container_name: trip-redis
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
+    # Internal-only by default — host port 6379 often conflicts with a
+    # locally installed Redis / Memurai service.
+    expose:
+      - "6379"
     volumes:
       - ./redisdata:/data
     healthcheck:
@@ -68,3 +78,98 @@ services:
       mc anonymous set download local/${S3_BUCKET:-homepage-media};
       echo 'bucket ready';
       "
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: dev
+    container_name: trip-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      # Override the host-form URLs from .env with in-network service names.
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-trip_planner}
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      # S3_PUBLIC_BASE_URL must stay reachable from the user's browser, so it
+      # keeps the host form (localhost:9000). Don't override it here.
+      PORT: 3000
+      NODE_ENV: development
+      CORS_ORIGIN: http://localhost:5173
+      ENABLE_EMBEDDED_WORKER: "true"
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "${API_PORT:-3000}:3000"
+    volumes:
+      - .:/workspace
+      # Mask host node_modules so the Linux container doesn't see Windows-built
+      # Prisma engine binaries hoisted on the host.
+      - api_node_modules:/workspace/node_modules
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      target: dev
+    container_name: trip-web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_started
+    environment:
+      # Server-side dev proxy target. Browser code keeps using
+      # window.location.origin (no VITE_API_BASE_URL set on purpose).
+      VITE_DEV_PROXY_TARGET: http://api:3000
+      VITE_GOOGLE_MAPS_API_KEY: ${VITE_GOOGLE_MAPS_API_KEY:-}
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "${WEB_PORT:-5173}:5173"
+    volumes:
+      - .:/workspace
+      - web_node_modules:/workspace/node_modules
+
+  # First-time database initialisation. Opt-in via `--profile init`.
+  # Runs `prisma db push` (no migrations dir exists yet) then seeds the admin.
+  db-init:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: dev
+    profiles: ["init"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-trip_planner}
+      NODE_ENV: development
+    volumes:
+      - .:/workspace
+      - api_node_modules:/workspace/node_modules
+    working_dir: /workspace/apps/api
+    entrypoint: >
+      /bin/sh -c "
+      npx prisma db push --skip-generate &&
+      npx tsx scripts/applyCheckConstraints.ts &&
+      npx tsx src/db/seed.ts
+      "
+
+volumes:
+  api_node_modules:
+  web_node_modules:

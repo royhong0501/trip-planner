@@ -3,7 +3,6 @@ import { Loader2, Plus, Trash2, ChevronDown, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
-  getWeatherApiKey,
   searchCityPreview,
   fetchWeatherWithCache,
   fetchWeatherByCoordsWithCache,
@@ -31,7 +30,10 @@ export default function TripWeatherSidebar({ weatherCities, onWeatherCitiesChang
   /** 同時僅展開一個城市的詳細預報 */
   const [expandedCity, setExpandedCity] = useState<string | null>(null);
 
-  const hasKey = Boolean(getWeatherApiKey());
+  // OpenWeather key now lives server-side (see lib/weather.ts header). The
+  // browser can't see it, so we always allow the UI; failures surface as
+  // empty results from the /api/weather endpoints instead.
+  const hasKey = true;
 
   const loadAllWeather = useCallback(async (cities: string[]) => {
     if (!hasKey || cities.length === 0) {

@@ -4,7 +4,14 @@ import path from 'path';
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  const apiBaseUrl = (env.VITE_API_BASE_URL ?? '').trim() || 'http://localhost:3000';
+  // Server-side proxy target for `/api/*`. Falls back to VITE_API_BASE_URL so
+  // host-side `npm run dev` keeps working unchanged. Inside Docker the web
+  // container sets VITE_DEV_PROXY_TARGET=http://api:3000 so the proxy reaches
+  // the api service while browser code can still rely on window.location.origin.
+  const apiBaseUrl =
+    (env.VITE_DEV_PROXY_TARGET ?? '').trim() ||
+    (env.VITE_API_BASE_URL ?? '').trim() ||
+    'http://localhost:3000';
 
   return {
     base: '/',
